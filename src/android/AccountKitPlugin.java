@@ -16,9 +16,13 @@ import org.json.JSONException;
 
 import com.facebook.accountkit.AccountKit;
 import com.facebook.accountkit.AccessToken;
+import com.facebook.accountkit.Account;
+import com.facebook.accountkit.AccountKitCallback;
 import com.facebook.accountkit.AccountKitLoginResult;
 import com.facebook.accountkit.ui.AccountKitActivity;
 import com.facebook.accountkit.ui.AccountKitConfiguration;
+import com.facebook.accountkit.AccountKitError;
+import com.facebook.accountkit.PhoneNumber;
 import com.facebook.accountkit.ui.LoginType;
 
 
@@ -26,6 +30,9 @@ public class AccountKitPlugin extends CordovaPlugin {
   private static final String TAG = "AccountKitPlugin";
   public static int APP_REQUEST_CODE = 42;
   private CallbackContext loginContext = null;
+
+  public JSONObject accJSON;
+  public CallbackContext accContext = null;
 
   @Override
   public void initialize(CordovaInterface cordova, CordovaWebView webView) {
@@ -37,19 +44,24 @@ public class AccountKitPlugin extends CordovaPlugin {
   @Override
   public boolean execute(String action, final JSONArray args, final CallbackContext callbackContext) throws JSONException {
     if ("loginWithPhoneNumber".equals(action)) {
+
+      final String number = args.getString(0);
       cordova.getActivity().runOnUiThread(new Runnable() {
         @Override
         public void run() {
-          executeLogin(LoginType.PHONE, callbackContext);
+
+          Log.i("ACCOUNTKIT", "Got the number as "+number);
+          executeLogin(LoginType.PHONE, callbackContext , number);
         }
       });
       return true;
 
     } else if ("loginWithEmail".equals(action)) {
+		final String mail = args.getString(0);
       cordova.getActivity().runOnUiThread(new Runnable() {
         @Override
         public void run() {
-          executeLogin(LoginType.EMAIL, callbackContext);
+          executeLogin(LoginType.EMAIL, callbackContext , mail);
         }
       });
       return true;
@@ -57,6 +69,15 @@ public class AccountKitPlugin extends CordovaPlugin {
     } else if ("getAccessToken".equals(action)) {
       if (hasAccessToken()) {
         callbackContext.success(formatAccessToken(AccountKit.getCurrentAccessToken()));
+      } else {
+        callbackContext.error("Session not open.");
+      }
+      return true;
+
+    } else if ("getCurrentAccount".equals(action)) {
+      if (hasAccessToken()) {
+        // callbackContext.success(formatCurrentAccount(callbackContext));
+        formatCurrentAccount(callbackContext);
       } else {
         callbackContext.error("Session not open.");
       }
@@ -71,7 +92,7 @@ public class AccountKitPlugin extends CordovaPlugin {
     return false;
   }
 
-  public final void executeLogin(LoginType type, CallbackContext callbackContext) {
+  public final void executeLogin(LoginType type, CallbackContext callbackContext, String initialParam) {
     // Set a pending callback to cordova
     loginContext = callbackContext;
     PluginResult pr = new PluginResult(PluginResult.Status.NO_RESULT);
@@ -92,6 +113,12 @@ public class AccountKitPlugin extends CordovaPlugin {
       new AccountKitConfiguration.AccountKitConfigurationBuilder(
         type,
         AccountKitActivity.ResponseType.TOKEN);
+
+    if(type == LoginType.PHONE){
+      configurationBuilder.setInitialPhoneNumber(new PhoneNumber("+91",initialParam));
+    }else if (type == LoginType.EMAIL){
+		configurationBuilder.setInitialEmail(initialParam);
+	}
     intent.putExtra(AccountKitActivity.ACCOUNT_KIT_ACTIVITY_CONFIGURATION, configurationBuilder.build());
 
     cordova.setActivityResultCallback(this);
@@ -133,6 +160,56 @@ public class AccountKitPlugin extends CordovaPlugin {
 
   private boolean hasAccessToken() {
     return AccountKit.getCurrentAccessToken() != null;
+  }
+
+  public void formatCurrentAccount(CallbackContext callbackContext) {
+    
+    accContext = callbackContext;
+    
+    
+    AccountKit.getCurrentAccount(new AccountKitCallback<Account>() {
+        @Override
+        public void onSuccess(final Account account) {
+          // Get Account Kit ID
+          String accountKitId = account.getId();
+
+          // Get phone number
+          String phoneNumber = account.getPhoneNumber().getPhoneNumber();
+          String phoneNumberString = phoneNumber.toString();
+
+          // Get email
+          String email = account.getEmail();
+          try{
+              accJSON = new JSONObject();
+              Log.i("ACCOUNTKIT", accountKitId+" -- "+phoneNumberString+" -- "+email);
+              accJSON.put("accountId", accountKitId);
+              accJSON.put("phonenumber", phoneNumberString);
+              accJSON.put("email", email);
+
+              PluginResult pr = new PluginResult(PluginResult.Status.OK,accJSON);
+              pr.setKeepCallback(true);
+              accContext.sendPluginResult(pr);
+
+          
+          }catch (JSONException e) {
+              e.printStackTrace();
+              return;
+            }
+          
+
+          
+        }
+        
+        @Override
+        public void onError(final AccountKitError error) {
+          // Handle Error
+          accJSON = new JSONObject();
+          PluginResult pr = new PluginResult(PluginResult.Status.ERROR,error.getErrorType().getMessage());
+          pr.setKeepCallback(true);
+          accContext.sendPluginResult(pr);
+          //accContext.error(error.getErrorType().getMessage());
+        }
+      });
   }
 
   public JSONObject formatAccessToken(AccessToken accessToken) throws JSONException {
